@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: photograph-api
+  datasource:
+    url: ${PHOTOGRAPH_DB_URL}
+    username: ${PHOTOGRAPH_DB_USER}
+    password: ${PHOTOGRAPH_DB_PASSWORD}
+  flyway:
+    default-schema: photograph_app
+    clean-disabled: true
+
+photograph:
+  updates:
+    github-repository: ${PHOTOGRAPH_GITHUB_RELEASE_REPOSITORY:TanaderHui/Photograph}
+  community:
+    enabled: ${PHOTOGRAPH_COMMUNITY_ENABLED:true}
+  otp:
+    secret: ${PHOTOGRAPH_OTP_SECRET}
+  sms:
+    url: ${PHOTOGRAPH_SMS_URL:}
+    token: ${PHOTOGRAPH_SMS_TOKEN:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db

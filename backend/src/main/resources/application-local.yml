@@ -1,0 +1,12 @@
+server:
+  address: 127.0.0.1
+
+spring:
+  datasource:
+    url: ${PHOTOGRAPH_DB_URL:jdbc:postgresql://127.0.0.1:5432/photograph}
+    username: ${PHOTOGRAPH_DB_USER:photograph}
+    password: ${PHOTOGRAPH_DB_PASSWORD:photograph_dev_only}
+
+photograph:
+  otp:
+    secret: local-development-only-otp-secret-change-for-deployment

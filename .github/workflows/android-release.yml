@@ -1,0 +1,98 @@
+name: Android release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.8.2'
+      - name: Read version from the release tag
+        id: version
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]]; then
+            echo "::error::Use a tag such as v0.1.1, with each component between 0 and 999."
+            exit 1
+          fi
+          code=$(( BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 1000 + BASH_REMATCH[3] ))
+          if (( code < 2 )); then
+            echo "::error::The release version code must exceed the initial app version code."
+            exit 1
+          fi
+          printf 'name=%s\ncode=%s\n' "${GITHUB_REF_NAME#v}" "$code" >> "$GITHUB_OUTPUT"
+      - name: Install the project Android SDK
+        run: sdkmanager --install 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Build the release APK
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          API_URL: ${{ vars.ANDROID_API_BASE_URL }}
+          PRIVACY_URL: ${{ vars.ANDROID_PRIVACY_URL }}
+          SUPPORT_URL: ${{ vars.ANDROID_SUPPORT_URL }}
+          FILING_NUMBER: ${{ vars.ANDROID_FILING_NUMBER }}
+        run: |
+          gradle --no-daemon :app:assembleRelease \
+            "-PphotographVersionCode=$VERSION_CODE" "-PphotographVersionName=$VERSION_NAME" \
+            "-PphotographApiBaseUrl=$API_URL" "-PphotographPrivacyUrl=$PRIVACY_URL" \
+            "-PphotographSupportUrl=$SUPPORT_URL" "-PphotographFilingNumber=$FILING_NUMBER"
+      - name: Sign and verify the APK
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?missing ANDROID_KEYSTORE_BASE64}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?missing ANDROID_KEYSTORE_PASSWORD}"
+          : "${ANDROID_KEY_ALIAS:?missing ANDROID_KEY_ALIAS}"
+          : "${ANDROID_KEY_PASSWORD:?missing ANDROID_KEY_PASSWORD}"
+          keystore="$(mktemp "$RUNNER_TEMP/photograph-signing.XXXXXX")"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          signer="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          apk="$RUNNER_TEMP/photograph-$VERSION_CODE.apk"
+          "$signer" sign --ks "$keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$apk" android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$signer" verify "$apk"
+      - name: Publish the verified APK to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          apk="$RUNNER_TEMP/photograph-$VERSION_CODE.apk"
+          if draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" == "false" ]]; then
+              echo "Release $GITHUB_REF_NAME is already published."
+              exit 0
+            fi
+            gh release upload "$GITHUB_REF_NAME" "$apk" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$apk" \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --draft
+          fi
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

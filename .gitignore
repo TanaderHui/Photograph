@@ -1,0 +1,24 @@
+backend/target/
+backend/.m2/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+admin-web/node_modules/
+admin-web/dist/
+.idea/
+*.iml
+booking-dev.log
+
+# Generated archives, local deployment values, and signing material.
+photograph-dev-*.zip
+功能清单.docx
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.apk
+*.aab

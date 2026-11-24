@@ -1,0 +1,1181 @@
+openapi: 3.1.0
+info:
+  title: 拾光永恒 API
+  version: 0.2.0
+servers:
+  - url: /api/v1
+security:
+  - bearer: []
+paths:
+  /styles:
+    get:
+      security: []
+      operationId: listStyles
+      summary: 查询拍摄风格词表
+      responses:
+        '200':
+          description: 按展示顺序排列的风格词条
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Style'
+  /photographers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PhotographerId'
+    get:
+      operationId: getPhotographer
+      security: []
+      summary: 查看已通过审核的摄影师
+      responses:
+        '200':
+          description: 摄影师公开资料
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Photographer'
+        '404':
+          $ref: '#/components/responses/PhotographerNotFound'
+  /photographers/{id}/packages:
+    parameters:
+      - $ref: '#/components/parameters/PhotographerId'
+    get:
+      operationId: listPhotographerPackages
+      security: []
+      summary: 查询摄影师已上架的套餐
+      parameters:
+        - name: cursor
+          in: query
+          description: 原样传入上一页返回的 nextCursor
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: 已上架套餐列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackagePage'
+        '400':
+          description: 分页参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          $ref: '#/components/responses/PhotographerNotFound'
+  /auth/otp/challenges:
+    post:
+      security: []
+      operationId: requestLoginCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: {type: string}
+      responses:
+        '201':
+          description: 短信验证码申请已受理
+          headers:
+            Location:
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [challengeId, expiresIn]
+                properties:
+                  challengeId: {type: string}
+                  expiresIn: {type: integer, description: 有效秒数}
+        '429': {$ref: '#/components/responses/ApiError'}
+        '503': {$ref: '#/components/responses/ApiError'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /auth/sessions:
+    post:
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, code]
+              properties:
+                challengeId: {type: string}
+                code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '201': {$ref: '#/components/responses/Session'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /auth/sessions/refresh:
+    post:
+      security: []
+      operationId: refreshSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: {type: string}
+      responses:
+        '200': {$ref: '#/components/responses/Session'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /auth/sessions/logout:
+    post:
+      operationId: logout
+      responses:
+        '204': {description: 当前会话已撤销}
+        default: {$ref: '#/components/responses/ApiError'}
+  /auth/account:
+    delete:
+      operationId: closeAccount
+      summary: 注销当前账号，撤销全部会话并下架摄影师服务
+      responses:
+        '204': {description: 已注销}
+        '401': {description: 需要有效登录会话}
+        '403': {description: 运营账号由平台管理员处理}
+        '409': {description: 有进行中的约拍订单}
+  /app-update:
+    get:
+      security: []
+      operationId: getAppUpdate
+      summary: 查看 GitHub 发布的最新安卓安装包
+      responses:
+        '200':
+          description: 更新来源状态和正式安装包信息
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configured, release]
+                properties:
+                  configured: {type: boolean}
+                  release:
+                    type: [object, 'null']
+                    required: [versionCode, versionName, downloadUrl]
+                    properties:
+                      versionCode: {type: integer, minimum: 1}
+                      versionName: {type: string}
+                      downloadUrl: {type: string, format: uri}
+        '503': {$ref: '#/components/responses/ApiError'}
+  /search/home:
+    get:
+      security: []
+      operationId: searchPhotographers
+      summary: 按昵称、城市和风格查询已审核摄影师
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 80}
+        - name: type
+          in: query
+          schema: {const: photographer}
+        - name: city
+          in: query
+          schema: {type: string, maxLength: 100}
+        - name: style
+          in: query
+          description: 风格 ID
+          schema: {type: string, maxLength: 100}
+        - name: bookable
+          in: query
+          description: 仅返回开启付费或互免约拍且有已上架套餐的摄影师
+          schema: {type: boolean, default: false}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 摄影师命中列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        nickname: {type: string}
+                        city: {type: string}
+                        bio: {type: string}
+                        matchedFields:
+                          type: array
+                          items: {enum: [nickname, city, style]}
+                        score: {type: integer}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /works:
+    get:
+      security: []
+      operationId: listPublicWorks
+      summary: 获取已公开且未撤回的作品
+      parameters:
+        - $ref: '#/components/parameters/FeedScope'
+        - $ref: '#/components/parameters/FeedQuery'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: city
+          in: query
+          schema: {type: string, maxLength: 100}
+        - name: style
+          in: query
+          schema: {type: string, description: 风格 ID}
+      responses:
+        '200':
+          description: 作品列表与下一页游标
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PublicWork'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /feed:
+    get:
+      security: []
+      operationId: listCommunityFeed
+      parameters:
+        - $ref: '#/components/parameters/FeedScope'
+        - $ref: '#/components/parameters/FeedQuery'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 社区帖子与下一页游标
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/CommunityPost'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /places:
+    get:
+      security: []
+      operationId: searchPhotoPlaces
+      parameters:
+        - $ref: '#/components/parameters/FeedQuery'
+        - name: city
+          in: query
+          schema: {type: string, maxLength: 100}
+      responses:
+        '200':
+          description: 匹配的公开拍摄地点
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PhotoPlace'}}
+        default: {$ref: '#/components/responses/ApiError'}
+  /places/{id}:
+    get:
+      security: []
+      operationId: getPhotoPlace
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 公开拍摄地点详情
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PhotoPlace'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /map/markers:
+    get:
+      security: []
+      operationId: listPhotoMarkers
+      parameters:
+        - name: bbox
+          in: query
+          required: true
+          description: WGS84，按西、南、东、北排列
+          schema: {type: string}
+        - name: zoom
+          in: query
+          required: true
+          schema: {type: number, minimum: 0, maximum: 23}
+        - name: category
+          in: query
+          schema: {enum: [SCENIC, SPOT]}
+      responses:
+        '200':
+          description: 视野内的地点或聚合点
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type: {enum: [PLACE, CLUSTER]}
+                        placeId: {type: [string, 'null']}
+                        name: {type: [string, 'null']}
+                        category: {enum: [SCENIC, SPOT, null]}
+                        longitude: {type: number}
+                        latitude: {type: number}
+                        count: {type: integer, minimum: 1}
+        default: {$ref: '#/components/responses/ApiError'}
+  /posts:
+    post:
+      operationId: publishCommunityPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientPostId, body]
+              properties:
+                clientPostId: {type: string, format: uuid, description: 重试同一篇帖子时保持不变}
+                body: {type: string, minLength: 1, maxLength: 2000}
+      responses:
+        '201': {$ref: '#/components/responses/CommunityPost'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /posts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      security: []
+      operationId: getCommunityPost
+      responses:
+        '200': {$ref: '#/components/responses/CommunityPost'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/posts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      operationId: removeOwnPost
+      responses:
+        '204': {description: 自己的帖子已移除}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/following/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      operationId: followAccount
+      responses:
+        '200': {$ref: '#/components/responses/FollowState'}
+        default: {$ref: '#/components/responses/ApiError'}
+    delete:
+      operationId: unfollowAccount
+      responses:
+        '200': {$ref: '#/components/responses/FollowState'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/profile:
+    get:
+      operationId: getOwnProfile
+      responses:
+        '200': {$ref: '#/components/responses/Profile'}
+        default: {$ref: '#/components/responses/ApiError'}
+    patch:
+      operationId: updateOwnProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: {type: string, maxLength: 80}
+                acceptsPaidBookings: {type: boolean}
+                acceptsTfpBookings: {type: boolean}
+      responses:
+        '200': {$ref: '#/components/responses/Profile'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer:
+    get:
+      operationId: getOwnPhotographer
+      responses:
+        '200': {$ref: '#/components/responses/Workspace'}
+        default: {$ref: '#/components/responses/ApiError'}
+    put:
+      operationId: updateOwnPhotographer
+      requestBody: {$ref: '#/components/requestBodies/PhotographerBio'}
+      responses:
+        '200': {$ref: '#/components/responses/Workspace'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/applications:
+    post:
+      operationId: applyAsPhotographer
+      requestBody: {$ref: '#/components/requestBodies/PhotographerBio'}
+      responses:
+        '201': {$ref: '#/components/responses/Workspace'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/styles:
+    put:
+      operationId: updateOwnStyles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [styleIds]
+              properties:
+                styleIds: {type: array, maxItems: 30, uniqueItems: true, items: {type: string}}
+      responses:
+        '200': {$ref: '#/components/responses/Workspace'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/packages:
+    get:
+      operationId: listOwnPackages
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 自己的套餐，含草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ManagedPackage'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+    post:
+      operationId: createPackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PackageEdit'}
+      responses:
+        '201': {$ref: '#/components/responses/ManagedPackage'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/packages/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      operationId: updatePackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PackageEdit'
+                - required: [expectedVersion]
+      responses:
+        '200': {$ref: '#/components/responses/ManagedPackage'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /admin/photographers:
+    get:
+      operationId: listPhotographerApplications
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 待审核摄影师申请
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        nickname: {type: string}
+                        city: {type: string}
+                        bio: {type: string}
+                        version: {type: integer}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /admin/photographers/{id}/decision:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      operationId: decidePhotographerApplication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason, expectedVersion]
+              properties:
+                decision: {enum: [APPROVED, REJECTED, SUSPENDED]}
+                reason: {type: string, minLength: 1, maxLength: 500}
+                expectedVersion: {type: integer, minimum: 1}
+      responses:
+        '204': {description: 审核裁定已写入日志}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/calendar:
+    get:
+      operationId: getOwnCalendar
+      responses:
+        '200': {$ref: '#/components/responses/Calendar'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/availability:
+    put:
+      operationId: replaceAvailability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CalendarEdit'}
+      responses:
+        '200': {$ref: '#/components/responses/Calendar'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/photographer/calendar-visibility:
+    put:
+      operationId: updateCalendarVisibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: {enum: [PUBLIC, PRIVATE]}
+      responses:
+        '200': {$ref: '#/components/responses/Calendar'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /photographers/{id}/availability:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      security: []
+      operationId: getPublicAvailability
+      parameters:
+        - name: packageId
+          in: query
+          required: true
+          schema: {type: string}
+        - name: date
+          in: query
+          required: true
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: 公开可约时段，私密时返回 PRIVATE 和空数组
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visibility: {enum: [PUBLIC, PRIVATE]}
+                  zoneId: {type: [string, 'null']}
+                  slots: {type: array, items: {$ref: '#/components/schemas/TimeWindow'}}
+        default: {$ref: '#/components/responses/ApiError'}
+  /bookings:
+    post:
+      operationId: createBooking
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [packageId, packageVersion, startsAt, meetingArea]
+              properties:
+                packageId: {type: string}
+                packageVersion: {type: integer, minimum: 1}
+                startsAt: {type: string, format: date-time}
+                meetingArea: {type: string, maxLength: 200}
+                note: {type: string, maxLength: 1000}
+                engagementType: {enum: [PAID, TFP], default: PAID}
+      responses:
+        '201': {$ref: '#/components/responses/Booking'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/bookings:
+    get:
+      operationId: listOwnBookings
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: completed
+          in: query
+          description: true 仅查询已完成，false 查询其余状态，省略时返回所有状态
+          schema: {type: boolean}
+      responses:
+        '200':
+          description: 账号作为顾客或摄影师参与的订单
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Booking'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /bookings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getBooking
+      responses:
+        '200': {$ref: '#/components/responses/Booking'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /bookings/{id}/actions:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      operationId: applyBookingAction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, expectedVersion]
+              properties:
+                action: {enum: [accept, reject, withdraw, cancel, confirmShoot, markDelivered, confirmReceipt]}
+                expectedVersion: {type: integer, minimum: 1}
+                reasonCode: {type: string, description: 距开拍不足 24 小时取消时必填}
+      responses:
+        '200': {$ref: '#/components/responses/Booking'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /bookings/{id}/reschedules:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      operationId: proposeReschedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [startsAt, expectedVersion]
+              properties:
+                startsAt: {type: string, format: date-time}
+                expectedVersion: {type: integer, minimum: 1}
+      responses:
+        '201':
+          description: 改期已发起，待对方决定
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Reschedule'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /bookings/{id}/reschedules/{rid}/decision:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: rid
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      operationId: decideReschedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, expectedVersion]
+              properties:
+                decision: {enum: [accept, reject]}
+                expectedVersion: {type: integer, minimum: 1}
+      responses:
+        '200': {$ref: '#/components/responses/Booking'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /conversations:
+    post:
+      operationId: openConversation
+      summary: 由摄影师主页或订单打开一对一私聊
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                photographerId: {type: string, format: uuid}
+                bookingId: {type: string, format: uuid}
+              oneOf:
+                - required: [photographerId]
+                - required: [bookingId]
+      responses:
+        '200':
+          description: 已有或新建的双人会话
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Conversation'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/conversations:
+    get:
+      operationId: listConversations
+      summary: 按最近消息时间列出当前账号的私聊
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 会话分页
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Conversation'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+  /conversations/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: listChatMessages
+      summary: 参与者读取最近消息、历史分页或增量消息
+      parameters:
+        - name: beforeSeq
+          in: query
+          schema: {type: integer, format: int64, minimum: 1}
+        - name: afterSeq
+          in: query
+          schema: {type: integer, format: int64, minimum: 0}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 私聊消息分页。指定 afterSeq 时按序号升序，其余按降序
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ChatMessage'}}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+    post:
+      operationId: sendChatMessage
+      summary: 发送文字消息。同一发送者重复提交相同 clientMessageId 和正文时返回原消息
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientMessageId, text]
+              properties:
+                clientMessageId: {type: string, format: uuid}
+                text: {type: string, minLength: 1, maxLength: 2000}
+      responses:
+        '200':
+          description: 已保存的消息
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessage'}
+        default: {$ref: '#/components/responses/ApiError'}
+  /conversations/{id}/read:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      operationId: markConversationRead
+      summary: 仅推进当前参与者的已读序号
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq]
+              properties:
+                seq: {type: integer, format: int64, minimum: 1}
+      responses:
+        '204': {description: 已读序号已处理}
+        default: {$ref: '#/components/responses/ApiError'}
+  /me/notifications:
+    get:
+      operationId: listOwnNotifications
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 当前账号的订单通知
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        bookingId: {type: string}
+                        eventType: {type: string}
+                        createdAt: {type: string, format: date-time}
+                  nextCursor: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/ApiError'}
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    FeedScope:
+      name: scope
+      in: query
+      description: 关注和本人内容需发送有效会话令牌
+      schema: {enum: [discover, following, mine], default: discover}
+    FeedQuery:
+      name: q
+      in: query
+      schema: {type: string, maxLength: 100}
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    Cursor:
+      name: cursor
+      in: query
+      description: 原样传入上一页的 nextCursor
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 同一账号和接口用同一键重放成功请求时返回原结果，已使用的键不能提交不同内容
+      schema: {type: string, minLength: 1, maxLength: 120}
+    PhotographerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBodies:
+    PhotographerBio:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [city]
+            properties:
+              city: {type: string, minLength: 1, maxLength: 100}
+              bio: {type: string, maxLength: 2000}
+  responses:
+    CommunityPost:
+      description: 已发布的社区帖子
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CommunityPost'}
+    FollowState:
+      description: 当前关注状态
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [following]
+            properties:
+              following: {type: boolean}
+    ApiError:
+      description: 请求格式、鉴权、版本冲突或字段校验等错误
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApiError'}
+    Session:
+      description: 登录或刷新成功，返回新会话令牌
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [accessToken, refreshToken, expiresIn, tokenType]
+            properties:
+              accessToken: {type: string}
+              refreshToken: {type: string}
+              expiresIn: {type: integer, description: 访问令牌有效秒数}
+              tokenType: {const: Bearer}
+    Profile:
+      description: 本人账号资料
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [id, nickname, operator, acceptsPaidBookings, acceptsTfpBookings]
+            properties:
+              id: {type: string}
+              nickname: {type: string}
+              operator: {type: boolean}
+              acceptsPaidBookings: {type: boolean}
+              acceptsTfpBookings: {type: boolean}
+    Workspace:
+      description: 本人摄影师资料及审核状态
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [id, city, bio, approvalStatus, version, styleIds]
+            properties:
+              id: {type: string}
+              city: {type: string}
+              bio: {type: string}
+              approvalStatus: {enum: [PENDING, APPROVED, REJECTED, SUSPENDED]}
+              version: {type: integer}
+              styleIds: {type: array, items: {type: string}}
+    ManagedPackage:
+      description: 摄影师的套餐
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ManagedPackage'}
+    Calendar:
+      description: 本人工作区间、缓冲、已占用区间及日历可见范围
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/CalendarEdit'
+              - type: object
+                required: [visibility, busy]
+                properties:
+                  visibility: {enum: [PUBLIC, PRIVATE]}
+                  busy: {type: array, items: {$ref: '#/components/schemas/TimeWindow'}}
+    Booking:
+      description: 订单参与者可见的订单和套餐快照
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Booking'}
+    PhotographerNotFound:
+      description: 摄影师不存在或当前不可公开查看
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    Conversation:
+      type: object
+      required: [id, peerId, peerName, peerClosed, updatedAt, lastText, unreadCount]
+      properties:
+        id: {type: string, format: uuid}
+        peerId: {type: string, format: uuid}
+        peerName: {type: string}
+        peerClosed: {type: boolean}
+        updatedAt: {type: string, format: date-time}
+        lastText: {type: [string, 'null']}
+        unreadCount: {type: integer, minimum: 0}
+    ChatMessage:
+      type: object
+      required: [seq, senderId, clientMessageId, text, createdAt]
+      properties:
+        seq: {type: integer, format: int64, minimum: 1}
+        senderId: {type: string, format: uuid}
+        clientMessageId: {type: string, format: uuid}
+        text: {type: string}
+        createdAt: {type: string, format: date-time}
+    PhotoPlace:
+      type: object
+      required: [id, name, city, category, description, longitude, latitude]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        city: {type: string}
+        category: {enum: [SCENIC, SPOT]}
+        description: {type: string}
+        longitude: {type: number}
+        latitude: {type: number}
+    CommunityPost:
+      type: object
+      required: [id, authorId, nickname, body, createdAt, following]
+      properties:
+        id: {type: string}
+        authorId: {type: string}
+        nickname: {type: string}
+        body: {type: string}
+        createdAt: {type: string, format: date-time}
+        following: {type: boolean}
+    PublicWork:
+      type: object
+      required: [id, photographerId, authorId, nickname, city, bio, title, caption, thumbnailUrl, publishedAt, following]
+      properties:
+        id: {type: string}
+        photographerId: {type: string}
+        authorId: {type: string}
+        nickname: {type: string}
+        city: {type: string}
+        bio: {type: string}
+        title: {type: string}
+        caption: {type: string}
+        thumbnailUrl: {type: string, format: uri}
+        styleName: {type: [string, 'null']}
+        publishedAt: {type: string, format: date-time}
+        following: {type: boolean}
+    TimeWindow:
+      type: object
+      required: [startsAt, endsAt]
+      properties:
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+    CalendarEdit:
+      type: object
+      required: [zoneId, bufferMinutes, windows]
+      properties:
+        zoneId: {type: string, example: Asia/Shanghai}
+        bufferMinutes: {type: integer, minimum: 0, maximum: 120}
+        windows: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/TimeWindow'}}
+    ManagedPackage:
+      allOf:
+        - $ref: '#/components/schemas/PhotographyPackage'
+        - type: object
+          required: [listed]
+          properties:
+            listed: {type: boolean}
+    PackageEdit:
+      type: object
+      required: [name, durationMinutes, retouchedCount, deliveryDays, priceMinor, listed]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        durationMinutes: {type: integer, minimum: 30, maximum: 720}
+        retouchedCount: {type: integer, minimum: 0}
+        deliveryDays: {type: integer, minimum: 1}
+        priceMinor: {type: integer, minimum: 0}
+        listed: {type: boolean}
+        expectedVersion: {type: integer, minimum: 1}
+    Reschedule:
+      type: object
+      required: [id, startsAt, proposedBy, status]
+      properties:
+        id: {type: string}
+        startsAt: {type: string, format: date-time}
+        proposedBy: {type: string}
+        status: {enum: [PENDING, ACCEPTED, REJECTED, CLOSED]}
+    Booking:
+      type: object
+      required: [id, schemaVersion, customerId, photographerId, photographerAccountId, status, version,
+        startsAt, endsAt, expiresAt, zoneId, packageSnapshot, engagementType, settlementMode, meetingArea, note,
+        customerConfirmed, photographerConfirmed]
+      properties:
+        id: {type: string}
+        schemaVersion: {type: integer}
+        customerId: {type: string}
+        photographerId: {type: string}
+        photographerAccountId: {type: string}
+        status: {type: string, description: 客户端应为未识别状态提供可读回退}
+        deliveredAt: {type: [string, 'null'], format: date-time, description: 摄影师标记线下交片的时间}
+        completedAt: {type: [string, 'null'], format: date-time, description: 顾客确认收片的时间}
+        version: {type: integer, minimum: 1}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        zoneId: {type: string}
+        packageSnapshot:
+          type: object
+          required: [name, version, durationMinutes, retouchedCount, deliveryDays, priceMinor, currency]
+          properties:
+            name: {type: string}
+            version: {type: integer}
+            durationMinutes: {type: integer}
+            retouchedCount: {type: integer}
+            deliveryDays: {type: integer}
+            priceMinor: {type: integer}
+            currency: {const: CNY}
+        engagementType: {enum: [PAID, TFP]}
+        settlementMode: {enum: [OFFLINE, NO_PAYMENT]}
+        meetingArea: {type: string}
+        note: {type: string}
+        cancellationReason: {type: [string, 'null']}
+        customerConfirmed: {type: boolean}
+        photographerConfirmed: {type: boolean}
+        pendingReschedule:
+          oneOf:
+            - $ref: '#/components/schemas/Reschedule'
+            - type: 'null'
+    Style:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: 稳定的风格标识
+        name:
+          type: string
+          description: 风格展示名称
+    Photographer:
+      type: object
+      required: [id, nickname, city, bio, styleIds]
+      properties:
+        id:
+          type: string
+        nickname:
+          type: string
+        city:
+          type: string
+        bio:
+          type: string
+        styleIds:
+          type: array
+          items:
+            type: string
+    PackagePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhotographyPackage'
+        nextCursor:
+          type: [string, 'null']
+    PhotographyPackage:
+      type: object
+      required: [id, name, version, durationMinutes, retouchedCount, deliveryDays, priceMinor, currency]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        durationMinutes:
+          type: integer
+          minimum: 1
+        retouchedCount:
+          type: integer
+          minimum: 0
+        deliveryDays:
+          type: integer
+          minimum: 1
+        priceMinor:
+          type: integer
+          minimum: 0
+        currency:
+          const: CNY
+    ApiError:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
